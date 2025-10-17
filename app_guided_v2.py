@@ -198,7 +198,8 @@ def normalize_minmax(x):
     if rng<=0: return np.zeros_like(x)
     return (x-xmin)/(rng+1e-12)
 
-# -------------- Step 0: Load hierarchy --------------
+# -------------- Step 0: 数据准备（加载层级关系） --------------
+
 st.sidebar.header("步骤导航")
 st.sidebar.markdown("""
 ## 🧭 步骤导航
@@ -215,41 +216,18 @@ st.sidebar.markdown("""
 - 🏁 综合评分与结果导出
 """)
 
-uploaded_hier = st.file_uploader("上传层级关系 CSV（列：level,id,name,parent_id,type；已为你生成 hierarchy.csv）", type=["csv"])
-default_path = "hierarchy.csv"
-if uploaded_hier is not None:
-    df_hier = pd.read_csv(uploaded_hier)
-elif os.path.exists(default_path):
-    df_hier = pd.read_csv(default_path)
-    st.caption("已加载本地 hierarchy.csv")
-else:
-    st.error("请先上传层级关系CSV。"); st.stop()
+# ========== 三种数据选择模式 ==========
+st.header("Ⅰ. 数据准备")
+st.info("请选择层级结构数据来源：")
 
-# Validate
-need_cols = {"level","id","name","parent_id","type"}
-if not need_cols.issubset(set([c.lower() for c in df_hier.columns])):
-    st.error("CSV 必须包含列：level,id,name,parent_id,type"); st.stop()
+data_option = st.radio(
+    "请选择使用方式：",
+    ["📂 上传自定义层级文件", "📥 下载示范数据查看结构", "🚀 直接使用示范数据"],
+    index=2,
+    horizontal=True
+)
 
-# Standardize cols
-df_hier.columns = [c.lower() for c in df_hier.columns]
-df_hier["level"] = df_hier["level"].astype(int)
-
-L1_nodes = df_hier[df_hier["level"]==1].copy()
-L2_nodes = df_hier[df_hier["level"]==2].copy()
-L3_nodes = df_hier[df_hier["level"]==3].copy()
-
-st.success(f"已加载层级：一级 {len(L1_nodes)}，二级 {len(L2_nodes)}，三级 {len(L3_nodes)}（叶子指标）。")
-
-# Groupings
-children_L1 = {pid: L2_nodes[L2_nodes["parent_id"]==pid]["id"].tolist() for pid in L1_nodes["id"]}
-children_L2 = {pid: L3_nodes[L3_nodes["parent_id"]==pid]["id"].tolist() for pid in L2_nodes["id"]}
-name_map = df_hier.set_index("id")["name"].to_dict()
-type_map = df_hier[df_hier["level"]==3].set_index("id")["type"].to_dict()
-
-# ---------------- 示例文件下载 ----------------
-st.subheader("📘 示例文件下载")
-
-# 示例 hierarchy.csv 内容
+# ========== 定义示范数据 ==========
 example_hier = """level,id,name,parent_id,type
 1,C1,ESG,,
 1,C2,KPI,,
@@ -304,39 +282,49 @@ example_hier = """level,id,name,parent_id,type
 3,T37,供应链协同创新,D4,benefit
 """
 
-# 示例 company_scores_demo.csv 内容
-example_scores = """Company,T1,T2,T3,T4,T5,T6,T7,T8,T9,T10,T11,T12,T13,T14,T15,T16,T17,T18,T19,T20,T21,T22,T23,T24,T25,T26,T27,T28,T29,T30,T31,T32,T33,T34,T35,T36,T37
-公司A,80,72,88,83,77,92,86,84,79,88,91,73,85,82,87,89,90,75,86,88,85,87,70,89,84,88,85,75,90,88,86,83,82,84,85,78,89
-公司B,85,76,90,85,79,90,85,82,81,84,87,70,83,80,85,87,88,74,85,87,82,86,72,88,83,85,84,74,88,86,85,84,83,85,86,80,87
-公司C,88,74,91,86,80,93,88,85,82,86,88,72,86,83,88,89,90,76,87,89,84,88,73,89,85,87,86,76,91,87,86,85,84,86,87,82,88
-公司D,78,70,85,80,75,88,82,80,77,83,86,68,82,78,83,85,86,70,82,84,80,84,68,85,81,84,82,70,85,83,82,80,79,81,83,76,84
-公司E,92,80,94,90,85,96,92,88,85,90,95,76,89,88,92,93,95,80,90,92,89,92,75,93,88,91,90,78,95,91,90,88,87,89,90,84,91
-公司F,84,75,89,84,78,91,85,82,80,85,89,70,84,81,86,88,89,73,84,86,82,86,71,87,83,86,84,73,87,85,84,83,82,84,85,79,86
-公司G,90,78,93,88,83,95,90,86,83,88,93,74,87,86,90,92,93,78,89,91,87,90,74,91,86,89,88,77,93,89,88,86,85,87,89,83,90
-公司H,82,73,87,82,76,89,83,81,78,84,87,69,83,79,84,86,87,72,83,85,81,84,69,85,81,84,83,71,86,84,83,81,80,82,84,77,85
-公司I,88,77,92,87,81,94,89,85,82,87,91,73,86,84,89,90,91,76,88,90,85,88,73,89,85,88,86,75,90,87,86,84,83,85,87,81,88
-公司J,86,75,90,85,79,92,87,83,80,85,89,71,84,82,87,88,89,74,85,87,83,86,71,87,83,86,84,73,88,85,84,83,82,84,86,79,87
-"""
+# ========== 三种选择逻辑 ==========
+if data_option == "📂 上传自定义层级文件":
+    uploaded_hier = st.file_uploader("上传层级关系 CSV（列：level,id,name,parent_id,type）", type=["csv"])
+    if uploaded_hier is not None:
+        df_hier = pd.read_csv(uploaded_hier)
+    else:
+        st.stop()
 
-col1, col2 = st.columns(2)
-with col1:
+elif data_option == "📥 下载示范数据查看结构":
     st.download_button(
-        label="📥 下载示例层级文件（hierarchy_demo.csv）",
+        label="📥 点击下载示范层级文件（hierarchy_demo.csv）",
         data=example_hier.encode("utf-8-sig"),
         file_name="hierarchy_demo.csv",
         mime="text/csv",
-        help="用于演示的层级结构文件，可直接上传体验 AHP 计算流程"
+        help="示范数据仅供参考，可查看字段格式"
     )
-with col2:
-    st.download_button(
-        label="📊 下载示例企业得分文件（company_scores_demo.csv）",
-        data=example_scores.encode("utf-8-sig"),
-        file_name="company_scores_demo.csv",
-        mime="text/csv",
-        help="用于演示的企业×三级指标打分数据，可直接上传体验熵权与融合流程"
-    )
+    st.info("下载完成后可自行修改并上传体验。")
+    st.stop()
 
-st.info("💡 如果您还没有准备好的数据，可以先下载上方示例文件，再上传以体验完整流程。")
+else:  # 🚀 直接使用示范数据
+    df_hier = pd.read_csv(io.StringIO(example_hier))
+    st.success("✅ 已加载内置示范层级数据，可直接进入 AHP 权重计算。")
+
+# ========== 数据校验与标准化 ==========
+need_cols = {"level","id","name","parent_id","type"}
+if not need_cols.issubset(set([c.lower() for c in df_hier.columns])):
+    st.error("CSV 必须包含列：level,id,name,parent_id,type")
+    st.stop()
+
+df_hier.columns = [c.lower() for c in df_hier.columns]
+df_hier["level"] = df_hier["level"].astype(int)
+
+L1_nodes = df_hier[df_hier["level"]==1].copy()
+L2_nodes = df_hier[df_hier["level"]==2].copy()
+L3_nodes = df_hier[df_hier["level"]==3].copy()
+
+st.success(f"✅ 已加载层级：一级 {len(L1_nodes)}，二级 {len(L2_nodes)}，三级 {len(L3_nodes)}（叶子指标）。")
+
+# ========== 层级映射 ==========
+children_L1 = {pid: L2_nodes[L2_nodes["parent_id"]==pid]["id"].tolist() for pid in L1_nodes["id"]}
+children_L2 = {pid: L3_nodes[L3_nodes["parent_id"]==pid]["id"].tolist() for pid in L2_nodes["id"]}
+name_map = df_hier.set_index("id")["name"].to_dict()
+type_map = df_hier[df_hier["level"]==3].set_index("id")["type"].to_dict()
 
 
 # -------------- Step 1: AHP pairwise per parent --------------
@@ -443,52 +431,93 @@ df_RUC_AHP = pd.DataFrame({
 }).set_index("id")
 st.dataframe(df_RUC_AHP, use_container_width=True)
 
-# ---------------- Step 2: Upload company scores ----------------
-st.header("步骤二：上传企业×三级指标得分")
-st.caption("要求：列名为叶子指标 id（如 T1..T37）或中文名称（系统会自动识别），行=公司")
-scores_file = st.file_uploader("上传 CSV（Company列 + 37列指标）", type=["csv"], key="scorescsv")
-winsor = st.slider("Winsorize 去极值（每端百分比）", 0.0, 20.0, 0.0, 1.0)
+# ---------------- Step 2: 企业得分数据上传或选择 ----------------
+st.header("Ⅱ. 上传或选择企业×三级指标得分")
+st.caption("每行代表一个公司，列名需为叶子指标 id（如 T1..T37）或中文名称。")
 
-if scores_file is None:
-    st.info("等待上传公司得分表……")
+# 三选一入口
+score_option = st.radio(
+    "请选择企业得分数据来源：",
+    ["📂 上传自定义企业得分文件", "📊 下载示范数据查看结构", "🚀 直接使用示范数据"],
+    index=2,
+    horizontal=True
+)
+
+# 示例企业得分数据
+example_scores = """Company,T1,T2,T3,T4,T5,T6,T7,T8,T9,T10,T11,T12,T13,T14,T15,T16,T17,T18,T19,T20,T21,T22,T23,T24,T25,T26,T27,T28,T29,T30,T31,T32,T33,T34,T35,T36,T37
+公司A,80,72,88,83,77,92,86,84,79,88,91,73,85,82,87,89,90,75,86,88,85,87,70,89,84,88,85,75,90,88,86,83,82,84,85,78,89
+公司B,85,76,90,85,79,90,85,82,81,84,87,70,83,80,85,87,88,74,85,87,82,86,72,88,83,85,84,74,88,86,85,84,83,85,86,80,87
+公司C,88,74,91,86,80,93,88,85,82,86,88,72,86,83,88,89,90,76,87,89,84,88,73,89,85,87,86,76,91,87,86,85,84,86,87,82,88
+公司D,78,70,85,80,75,88,82,80,77,83,86,68,82,78,83,85,86,70,82,84,80,84,68,85,81,84,82,70,85,83,82,80,79,81,83,76,84
+公司E,92,80,94,90,85,96,92,88,85,90,95,76,89,88,92,93,95,80,90,92,89,92,75,93,88,91,90,78,95,91,90,88,87,89,90,84,91
+公司F,84,75,89,84,78,91,85,82,80,85,89,70,84,81,86,88,89,73,84,86,82,86,71,87,83,86,84,73,87,85,84,83,82,84,85,79,86
+公司G,90,78,93,88,83,95,90,86,83,88,93,74,87,86,90,92,93,78,89,91,87,90,74,91,86,89,88,77,93,89,88,86,85,87,89,83,90
+公司H,82,73,87,82,76,89,83,81,78,84,87,69,83,79,84,86,87,72,83,85,81,84,69,85,81,84,83,71,86,84,83,81,80,82,84,77,85
+公司I,88,77,92,87,81,94,89,85,82,87,91,73,86,84,89,90,91,76,88,90,85,88,73,89,85,88,86,75,90,87,86,84,83,85,87,81,88
+公司J,86,75,90,85,79,92,87,83,80,85,89,71,84,82,87,88,89,74,85,87,83,86,71,87,83,86,84,73,88,85,84,83,82,84,86,79,87
+"""
+
+# 三种选择逻辑
+if score_option == "📂 上传自定义企业得分文件":
+    scores_file = st.file_uploader("上传 CSV（Company列 + 叶子指标列）", type=["csv"], key="scorescsv")
+    if scores_file is not None:
+        df_scores = pd.read_csv(scores_file)
+    else:
+        st.stop()
+
+elif score_option == "📊 下载示范数据查看结构":
+    st.download_button(
+        label="📊 下载示范企业得分文件（company_scores_demo.csv）",
+        data=example_scores.encode("utf-8-sig"),
+        file_name="company_scores_demo.csv",
+        mime="text/csv",
+        help="示范数据可用 Excel 打开查看列格式"
+    )
+    st.info("下载完成后可自行修改并上传。")
     st.stop()
 
-df_scores = pd.read_csv(scores_file)
-# Detect company col
+else:  # 🚀 直接使用示范数据
+    df_scores = pd.read_csv(io.StringIO(example_scores))
+    st.success("✅ 已加载内置示范企业得分数据，可直接进入熵权与融合计算。")
+
+# Winsorize 参数
+winsor = st.slider("Winsorize 去极值（每端百分比）", 0.0, 20.0, 0.0, 1.0)
+
+# ---------------- 数据解析 ----------------
 first_col = df_scores.columns[0]
 if first_col.lower() in ["company","firm","企业","公司","name"]:
     df_scores = df_scores.set_index(first_col)
-# Try map columns by id or name
+
+# 匹配列名
 cols_by_id = [c for c in df_scores.columns if c in L3_nodes["id"].values]
-if len(cols_by_id)==len(L3_nodes):
+if len(cols_by_id) == len(L3_nodes):
     S = df_scores[cols_by_id].copy()
 else:
-    # try by name -> id
-    name_to_id = {name_map[i]:i for i in L3_nodes["id"]}
+    name_to_id = {name_map[i]: i for i in L3_nodes["id"]}
     try_cols = []
     for c in df_scores.columns:
         if c in name_to_id:
             try_cols.append(name_to_id[c])
-    if len(try_cols)==len(L3_nodes):
-        S = df_scores[ [name_map[i] for i in L3_nodes["id"]] ].copy()
+    if len(try_cols) == len(L3_nodes):
+        S = df_scores[[name_map[i] for i in L3_nodes["id"]]].copy()
         S.columns = L3_nodes["id"].tolist()
     else:
-        st.error("列名需为 T1..T37 或对应中文名称，且必须完整匹配。"); st.stop()
+        st.error("列名需为 T1..T37 或对应中文名称，且必须完整匹配。")
+        st.stop()
 
-# Winsorize
-if winsor>0:
-    low, high = winsor, 100-winsor
+# Winsorize 处理
+if winsor > 0:
+    low, high = winsor, 100 - winsor
     for col in S.columns:
         lo = np.nanpercentile(S[col].values, low)
         hi = np.nanpercentile(S[col].values, high)
         S[col] = S[col].clip(lo, hi)
 
-st.write("原始打分（S）")
-
-# 显示时将指标 id 替换为中文名
+st.subheader("原始企业得分")
 S_display = S.copy()
 S_display.columns = [name_map.get(c, c) for c in S.columns]
 st.dataframe(S_display, use_container_width=True)
+
 
 
 # ---------------- Step 3: Entropy weights ----------------
@@ -553,8 +582,8 @@ st.download_button("下载 公司评分 (CSV)", data=buf_scores, file_name="comp
 
 with st.expander("方法说明 / Notes"):
     st.markdown("""
-- **多层级 AHP**：按父节点逐块两两比较，计算本地权重与 CR；通过 RUC-AHP 稳健融合得到每块的本地权重；层层相乘得到**三级全局 AHP 权重**。
-- **Entropy weight**：基于企业×指标得分的标准化矩阵 Z 计算客观权重 ENT。成本型指标自动做方向反转。
-- **主客观融合**：`w ∝ (AHP^α)*(ENT^(1-α))`，默认 α=0.5（相乘开平方）。
+- **RUC_AHP (Robust Unified Combination AHP)**：按父节点逐块两两比较，计算本地权重与Consistency Ratio；通过 RUC-AHP 稳健融合得到每块的本地权重；层层相乘得到**三级全局 AHP 权重**。
+- **Entropy weight（EW）**：基于企业×指标得分的标准化矩阵 Z 计算客观权重 ENT。成本型指标自动做方向反转。
+- **主客观融合**：`w ∝ (AHP^α)*(ENT^(1-α))`，默认 α=0.5。
 - **最终得分**：`Score(company) = Σ w_i * Z_{company,i}`。
 """)
